@@ -1,147 +1,215 @@
-// const { req, res } = require('express');
 const express = require("express");
-const bodyParser = require("body-parser");
 const app = express();
-const PORT = 8080; // default port 8080
+const PORT = 8080;
+const bodyParser = require("body-parser");
+const cookieSession = require("cookie-session");
+const bcrypt = require("bcrypt");
+const { getUserUrls, getUserByEmail, generateRandomString } = require("./helpers");
 
-//set view engine to ejs
-app.set('view engine', 'ejs');
+
 app.use(bodyParser.urlencoded({extended: true}));
+app.use(cookieSession({
+  name: "session",
+  keys: ["key1", "key2"]
+}));
+app.set("view engine", "ejs");
 
 const urlDatabase = {
-  'b2xVn2': 'http://www.lighthouselabs.ca',
-  '9sm5xK': 'http://www.google.com'
+  "b2xVn2": {longURL: "http://www.lighthouselabs.ca", userID: "userRandomID"},
+  "9sm5xK": {longURL: "http://www.google.com", userID: "userRandomID"}
 };
 
-function generateRandomString() {
-  return Math.random().toString(16).substr(2, 6);
+const users = { 
+  "userRandomID": {
+    id: "userRandomID", 
+    email: "user@example.com", 
+    password: "purple-monkey-dinosaur"
+  },
+ "user2RandomID": {
+    id: "user2RandomID", 
+    email: "user2@example.com", 
+    password: "funksandforks"
+  }
 }
-//landing page
+
+
+
 app.get("/", (req, res) => {
-  res.redirect('/urls');
+  res.redirect("/urls");
 });
 
-//URL page
-app.get('/urls', (req, res) => {
-  const templateVars = { urls: urlDatabase };
-  res.render('urls_index', templateVars);
+
+// Login/logout handlers
+
+app.get("/login", (req, res) => {
+  const id = req.session.user_id;
+  const user = users[id];
+  const templateVars = { 
+    urls: urlDatabase,
+    username: user
+  };
+  if (user) {
+    res.redirect("/urls");
+  } else {
+    res.render("user_login", templateVars);
+  }
+})
+
+app.post("/login", (req, res) => {
+  const password = req.body.password;
+  const loginUser = getUserByEmail(req.body.email, users);
+  if (loginUser && bcrypt.compareSync(password, loginUser.password)) {
+    req.session.user_id = loginUser.id;
+    res.redirect("/urls");
+  } else {
+    res.status(403).redirect("/error?message=Incorrect password or username status code 403");
+  }
 });
 
-app.get('/urls/new', (req, res) => {
-  res.render('urls_new');
+app.get("/logout", (req, res) => {
+  req.session = null;
+  res.redirect("/urls");
 });
 
-app.get('/urls.json', (req, res) => {
-  res.json(urlDatabase);
+//Register handler
+
+
+app.get("/register", (req, res) => {
+  const id = req.session.user_id;
+  const user = users[id];
+  const templateVars = { 
+    urls: urlDatabase,
+    username: user
+  };
+  if (users[id]) {
+    res.redirect("/urls");
+  } else {
+    res.render("user_registration", templateVars);
+  }
 });
 
-//****POST REQUESTS
-//add URL
-app.post('/urls', (req, res) => {
-  let shortURL = generateRandomString();
-  urlDatabase[shortURL] = req.body.longURL;
-  console.log(urlDatabase);
+app.post("/register", (req, res) => {
+  let randomID = generateRandomString(12);
+  const hashedPassword = bcrypt.hashSync(req.body.password,10);
+  if (req.body.email === "" || req.body.password === "") {
+    res.status(400).redirect("/error?message=Please make sure to fill in all forms");
+  } else if (getUserByEmail(req.body.email,users) !== undefined) {
+    res.status(400).redirect("/error?message=That username is already take please choose something else"); 
+  } else {
+    users[randomID] = {
+      id: randomID,
+      email: req.body.email,
+      password: hashedPassword
+    };
+    req.session.user_id = randomID;
+    res.redirect("/urls");
+  }
+});
+
+
+// /urls handlers
+
+app.get("/urls", (req, res) => {
+  const id = req.session.user_id;
+  const user = users[id];
+  if (user) {
+    let urls = getUserUrls(urlDatabase, user);
+    const templateVars = { 
+      urls: urls,
+      username: user
+    }
+    res.render("urls_index", templateVars);
+  } else {
+    res.redirect("/error?message=Login/Register first to see your URLs");
+  }
+});
+
+app.post("/urls", (req, res) => {
+  const shortURL = generateRandomString(6);
+  const id = req.session.user_id;
+  urlDatabase[shortURL] = {longURL: req.body.longURL, userID: id};
   res.redirect(`/urls/${shortURL}`);
 });
 
-//delete
-app.post('/urls/:shortURL/delete', (req, res) => {
-  delete urlDatabase[req.params.shortURL];
-  res.redirect("/urls");
-})
-//edit
-app.post('/urls/:shortURL', (req, res) => {
-  const redirURL = req.params.shortURL;
-  urlDatabase[redirURL] = req.body.longURL;
-  res.redirect(`/urls/${redirURL}`);
+// create new url page
+app.get("/urls/new", (req, res) => {
+  const id = req.session.user_id;
+  const user = users[id];
+  if (user) {
+    const templateVars = { 
+      urls: urlDatabase,
+      username: user
+    };
+    res.render("urls_new", templateVars);
+  } else {
+    res.redirect("/login");
+  }
 });
 
-//routes
-//urls route
-app.get('/urls/:shortURL', (req, res) => {
-  const templateVars = { shortURL: req.params.shortURL, longURL: urlDatabase[req.params.shortURL] };
-  res.render('urls_show', templateVars);
+// show short url page
+app.get("/urls/:shortURL", (req, res) => {
+  const id = req.session.user_id;
+  const user = users[id];
+  let templateVars = {username: undefined, urls: undefined};
+  if (user) {
+    let urls = getUserUrls(urlDatabase, user);
+    if (!urls[req.params.shortURL]) {
+      res.status(404).redirect("/error?message=You are not allowed to access that url");
+    } else {
+      templateVars = {
+      shortURL: req.params.shortURL,
+      longURL: urls[req.params.shortURL].longURL,
+      username: user
+      }
+      res.render("urls_show", templateVars);
+    }
+  } else {
+    res.redirect("/urls");
+  }
 });
-//route for shortened link
-app.get('/u/:shortURL', (req, res) => {
-  const longURL = urlDatabase[req.params.shortURL];
-  res.redirect(longURL);
+
+
+app.post("/urls/:shortURL", (req, res) => {
+  const id = req.session.user_id;
+  if (users[id]) {
+    urlDatabase[req.body.shortURL] = {longURL: req.body.longURL, userID: id}; // req.params = :shortURL
+    res.redirect(`/urls`);
+  } else {
+    res.sendStatus(403);
+  }
+});
+
+app.post("/urls/:shortURL/delete", (req, res) => {
+  const id = req.session.user_id;
+  const userUrls = getUserUrls(urlDatabase,users[id]);
+  if (id && userUrls) {
+    delete urlDatabase[req.params.shortURL];
+    res.redirect(`/urls`);
+  } else {
+    res.sendStatus(403);
+  }
+});
+
+
+// go to the shorturl
+app.get("/u/:shortURL", (req, res) => {
+  if(urlDatabase[req.params.shortURL]){
+    const longURL = urlDatabase[req.params.shortURL].longURL;
+    if (longURL) {
+      res.redirect(longURL);
+    } 
+  } else {
+    res.redirect("/error?message=That URL is not in our database");
+  }
+});
+ 
+app.get("/error", (req,res) => {
+  const id = req.session.user_id;
+  const user = users[id];
+  let templateVars = {username: undefined, urls: undefined, message: req.query.message};
+  res.render("error_page", templateVars);
 })
 
-//LISTEN
 app.listen(PORT, () => {
-  console.log(`Example app listening on port ${PORT}!`);
+  console.log(`Example app listening on port ${PORT}`);
 });
-
-
-
-
-
-// const express = require("express");
-// const app = express();
-// const PORT = 8080;
-// const bodyParser = require("body-parser");
-// const cookieSession = require("cookie-session");
-// const bcrypt = require("bcrypt");
-// const { urlDatabase, userDatabase, randoString } = require("./helpers");
-
-
-// app.set("view engine", "ejs");
-// app.use(bodyParser.urlencoded({extended: true}));
-// app.use(cookieSession({
-//   name: "session",
-//   keys: ["house-key", "car-key", "egg"]
-// }));
-
-// const urlDatabase = {
-//   "b2xVn2": "http://www.lighthouselabs.ca",
-//   "9sm5xK": "http://www.google.com"
-// };
-
-
-// app.get("/", (req, res) => {
-//   res.send("Hello!");
-// });
-
-// app.get("/urls.json", (req, res) => {
-//   res.json(urlDatabase);
-// });
-
-// app.get("/hello", (req, res) => {
-//   res.send("<html><body>Hello <b>World</b></body></html>\n");
-// });
-
-// app.get("/urls", (req, res) => {
-//   const templateVars = { urls: urlDatabase };
-//   res.render("urls_index", templateVars);
-// });
-
-// app.get("/urls/new", (req, res) => {
-//   res.render("urls_new");
-// });
-
-// app.get("/urls/:shortURL", (req, res) => {
-//   const templateVars = { shortURL: req.params.shortURL, longURL: urlDatabase[req.params.shortURL] };
-//   res.render("urls_show", templateVars);
-// });
-
-// app.post("/urls", (req, res) => {
-//   console.log(req.body);
-//   res.send("Ok");
-// });
-
-// app.get("/u/:shortURL", (req, res) => {
-//   const longURL = urlDatabase[req.params.shortURL];
-//   res.redirect(longURL);
-// });
-
-// app.post("/urls/:shortURL/delete", (req, res) =>{
-//   delete urlDatabase[req.params.shortURL];
-//   console.log(urlDatabase);
-//   res.redirect("/urls");
-// });
-
-
-// app.listen(PORT, () => {
-//   console.log(`Example app listening on port ${PORT}`);
-// });
