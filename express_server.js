@@ -10,7 +10,7 @@ const { getUserUrls, getUserByEmail, generateRandomString } = require("./helpers
 app.use(bodyParser.urlencoded({extended: true}));
 app.use(cookieSession({
   name: "session",
-  keys: ["key1", "key2"]
+  keys: ["housekey", "cookey"]
 }));
 app.set("view engine", "ejs");
 
@@ -32,14 +32,11 @@ const users = {
   }
 }
 
-
-
 app.get("/", (req, res) => {
   res.redirect("/urls");
 });
 
-
-// Login/logout handlers
+// login/logout handlers
 
 app.get("/login", (req, res) => {
   const id = req.session.user_id;
@@ -62,7 +59,7 @@ app.post("/login", (req, res) => {
     req.session.user_id = loginUser.id;
     res.redirect("/urls");
   } else {
-    res.status(403).redirect("/error?message=Incorrect password or username status code 403");
+    res.status(403).redirect("/error?message=Incorrect password/username status code 403");
   }
 });
 
@@ -72,7 +69,6 @@ app.get("/logout", (req, res) => {
 });
 
 //Register handler
-
 
 app.get("/register", (req, res) => {
   const id = req.session.user_id;
@@ -92,9 +88,9 @@ app.post("/register", (req, res) => {
   let randomID = generateRandomString(12);
   const hashedPassword = bcrypt.hashSync(req.body.password,10);
   if (req.body.email === "" || req.body.password === "") {
-    res.status(400).redirect("/error?message=Please make sure to fill in all forms");
+    res.status(400).redirect("/error?message=Please fill in all forms");
   } else if (getUserByEmail(req.body.email,users) !== undefined) {
-    res.status(400).redirect("/error?message=That username is already take please choose something else"); 
+    res.status(400).redirect("/error?message=That username is already taken please choose something else"); 
   } else {
     users[randomID] = {
       id: randomID,
@@ -107,7 +103,7 @@ app.post("/register", (req, res) => {
 });
 
 
-// /urls handlers
+//urls handlers
 
 app.get("/urls", (req, res) => {
   const id = req.session.user_id;
